@@ -1,0 +1,200 @@
+## Loading the environment
+library("tidyverse")
+library("lubridate")
+library("janitor")
+library("dplyr")
+library("skimr")
+library("modeest")
+
+## Importing CSV files to R
+x0 <- read.csv("202112-divvy-tripdata.csv")
+x1 <- read_csv("202201-divvy-tripdata.csv")
+x2 <- read_csv("202202-divvy-tripdata.csv")
+x3 <- read_csv("202203-divvy-tripdata.csv")
+x4 <- read_csv("202204-divvy-tripdata.csv")
+x5 <- read_csv("202205-divvy-tripdata.csv")
+x6 <- read_csv("202206-divvy-tripdata.csv")
+x7 <- read_csv("202207-divvy-tripdata.csv")
+x8 <- read_csv("202208-divvy-tripdata.csv")
+x9 <- read_csv("202209-divvy-publictripdata.csv")
+x10 <- read_csv("202210-divvy-tripdata.csv")
+x11 <- read_csv("202211-divvy-tripdata.csv")
+
+# Making sure all of the column names match before combining the files
+skim_without_charts(x0) #started_at and ended_at are chr
+skim_without_charts(x1)
+skim_without_charts(x2)
+skim_without_charts(x3)
+skim_without_charts(x4)
+skim_without_charts(x5)
+skim_without_charts(x6)
+skim_without_charts(x7)
+skim_without_charts(x8)
+skim_without_charts(x9)
+skim_without_charts(x10)
+skim_without_charts(x11)
+
+# Converting the started_at and ended_at data set in x0 to POSIXct
+x0$started_at <- as.POSIXct(x0$started_at, format="%Y-%m-%d %H:%M:%S")
+x0$ended_at <- as.POSIXct(x0$ended_at, format="%Y-%m-%d %H:%M:%S")
+
+# Inspecting the data frames to look for anything that's out of place
+str(x0)
+str(x1)
+str(x2)
+str(x3)
+str(x4)
+str(x5)
+str(x6)
+str(x7)
+str(x8)
+str(x9)
+str(x10)
+str(x11)
+
+## Combining all of the lists to one list
+cyclist_list <- rbind(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11)
+str(cyclist_list)
+# Removing the lat and long, as they aren't necessary in the analysis
+cyclist_list <- cyclist_list %>% select(-c(start_lat, start_lng, end_lat, end_lng))
+
+# Previewing the data
+skim_without_charts(cyclist_list)
+glimpse(cyclist_list)
+head(cyclist_list)
+
+# Cleaning the data
+clean_names(cyclist_list)
+
+# Creating columns with the year, month, and day
+cyclist_list$date <- as.Date(cyclist_list$started_at) #The default format is yyyy-mm-dd
+cyclist_list$month <- format(as.Date(cyclist_list$date), "%m")
+cyclist_list$day <- format(as.Date(cyclist_list$date), "%d")
+cyclist_list$year <- format(as.Date(cyclist_list$date), "%Y")
+cyclist_list$day_of_week <- format(as.Date(cyclist_list$date), "%A")
+
+# Adding a column that shows the ride_length in seconds
+cyclist_list$ride_length <- difftime(cyclist_list$ended_at, cyclist_list$started_at)
+
+# Inspecting the data types to make sure I have the right types to be able to manipulate the data
+str(cyclist_list)
+
+# Converting the data type of the ride_length to integers so I can perform calculations with them
+is.factor(cyclist_list$ride_length)
+cyclist_list$ride_length <- as.numeric(as.character(cyclist_list$ride_length))
+is.numeric(cyclist_list$ride_length)
+
+# Creating a new data frame with removed data
+cyclist_list_v2 <- cyclist_list[!(cyclist_list$ride_length <= 0 | cyclist_list$ride_length<0),]
+cyclist_list_v2[cyclist_list_v2$start_station_name == " " | cyclist_list_v2$end_station_name == ""] <- NA
+cyclist_list_v2 <- cyclist_list_v2 %>% drop_na()
+
+# Dropping rows with NA values in station names
+cyclist_list_v2 %>% 
+  drop_na(c(start_station_name, end_station_name))
+
+# Descriptive analysis on ride_length (all figures in seconds)
+mean(cyclist_list_v2$ride_length) #straight average (total ride length / rides)
+median(cyclist_list_v2$ride_length) #midpoint number in the ascending array of ride lengths
+max(cyclist_list_v2$ride_length) #longest ride
+min(cyclist_list_v2$ride_length) #shortest ride
+ 
+# See the average ride time by each day for members vs casual users
+cyclist_list_v2 %>% aggregate(ride_length ~ member_casual + day_of_week,
+                              FUN = mean
+                              )
+aggregate(cyclist_list_v2$ride_length ~ cyclist_list_v2$member_casual + cyclist_list_v2$day_of_week, FUN = mean)
+
+# Fixing the order of the days of the week
+cyclist_list_v2$day_of_week <- ordered(cyclist_list_v2$day_of_week, 
+                                       levels=c("Sunday", 
+                                                "Monday", 
+                                                "Tuesday", 
+                                                "Wednesday", 
+                                                "Thursday", 
+                                                "Friday", 
+                                                "Saturday"))
+
+# After fixing the order, seeing the average ride time by each day for members vs casual users
+average_ride_time <- aggregate(cyclist_list_v2$ride_length ~ cyclist_list_v2$member_casual + cyclist_list_v2$day_of_week, FUN = mean)
+
+# Creating a table that summarizes use of rides by ride type
+ride_type <- cyclist_list_v2 %>% 
+  group_by(rideable_type) %>% 
+  summarize(count_different_bikes = n(), 
+            bike_types = n_distinct(rideable_type)) %>% 
+    group_by(rideable_type)
+
+# Analyzing ridership data by type and weekday
+average_ride_time_weekday <- cyclist_list_v2 %>% 
+  mutate(weekday = wday(started_at, label = TRUE)) %>%  #creates weekday field using wday()
+  group_by(member_casual, weekday) %>%  #groups by user type and weekday
+  summarise(number_of_rides = n()  #calculates the number of rides 
+            ,average_duration = mean(ride_length)) %>%   # average duration
+  arrange(member_casual, weekday)	   # sorts
+
+# Number of rides by rider type
+cyclist_list_v2 %>% 
+  mutate(weekday = wday(started_at, label = TRUE)) %>% 
+  group_by(member_casual, weekday) %>% 
+  summarise(number_of_rides = n(),) %>% 
+  arrange(member_casual, weekday)  %>% 
+  ggplot(aes(x = weekday, y = number_of_rides, fill = member_casual)) +
+    ggtitle("Number of Rides") +
+    xlab("Weekday") +
+    ylab("Number of Rides") +
+    geom_col(position = "dodge")
+
+# Number of rides by month
+cyclist_list_v2 %>% 
+  group_by(member_casual, month) %>% 
+  summarise(number_of_rides = n(),) %>% 
+  arrange(member_casual, month) %>% 
+  ggplot(data = cyclist_list_v2) + 
+  geom_bar(aes(x = month, y = number_of_rides, fill = member_casual))
+
+cyclist_list_v2 %>% 
+  group_by(member_casual) %>% 
+  summarise(n =)
+
+ggplot(data = cyclist_list_v2) +
+  geom_bar(mapping = aes(x = month, y = number_of_rides, fill = member_casual))
+
+# Average duration
+cyclist_list_v2 %>% 
+  mutate(weekday = wday(started_at, label = TRUE)) %>% 
+  group_by(member_casual, weekday) %>% 
+  summarise(number_of_rides = n(), average_duration_in_secs = mean(ride_length)) %>% 
+  arrange(member_casual, weekday)  %>% 
+  ggplot(aes(x = weekday, y = average_duration_in_secs, fill = member_casual)) +
+    ggtitle("Average Ride Duration") +
+    xlab("Weekday") +
+    ylab("Average Duration in Seconds") +
+    geom_col(position = "dodge")
+
+# Comparing the types of bikes annual and casual members like
+cyclist_list_v2 %>% 
+  filter(member_casual == "member" |
+         member_casual == "casual") %>% 
+  filter(rideable_type == "electric_bike" |
+         rideable_type == "classic_bike" |
+         rideable_type == "docked_bike") %>% 
+  ggplot(aes(x = member_casual, fill=rideable_type))+
+  ggtitle("Types of Rentals") +
+  xlab("Member Type") +
+  ylab("Number of Bikes Rented") +
+  geom_bar(position = 'dodge')
+
+# Comparing the number of rides between annual and casual members by station
+cyclist_list_v2 %>% 
+  dplyr::group_by(start_station_name) %>% 
+  filter(member_casual == "member" |
+           member_casual == "casual") %>%
+  summarize(num_of_rides_by_station = n_distinct(start_station_name)) %>% 
+  ggplot(aes(x = num_of_rides_by_station, y = start_station_name, fill = member_casual)) +
+  geom_bar(position = 'dodge')
+
+## Export csv file for further analysis and visualization
+counts <- aggregate(cyclist_list_v2$ride_length ~ cyclist_list_v2$member_casual + cyclist_list_v2$day_of_week, FUN = mean)
+write.csv(counts, file = 'Cyclist Data/avg_ride_length.csv')
+write.csv(cyclist_list_v2, file = 'cyclist_list_v2.csv')
